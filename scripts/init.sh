@@ -15,8 +15,8 @@ NC='\033[0m' # No Color
 VERBOSE=0
 
 # Get the directory paths
-ROOT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-SCRIPT_DIR="$ROOT_DIR/scripts"
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+ROOT_DIR="$( cd "$SCRIPT_DIR/.." && pwd )"
 
 # Function to log verbose messages
 log() {
@@ -34,13 +34,11 @@ error() {
 # Function to display help
 show_help() {
     echo -e "${BOLD}Mimir Initialization Script${NC}"
-    echo "Usage: $0 [-v] [-h]"
+    echo "Usage: init.sh [-v] [-h]"
     echo
     echo "Options:"
     echo "  -v    Verbose mode"
     echo "  -h    Show this help message"
-    echo
-    echo "For complete environment reset, use: ./scripts/reset-mimir-environment.sh"
     echo
     exit 0
 }
@@ -61,22 +59,17 @@ while getopts "vh" opt; do
     esac
 done
 
-# Verify scripts directory exists
-if [ ! -d "$SCRIPT_DIR" ]; then
-    error "Scripts directory not found at: $SCRIPT_DIR"
-fi
-
 # Main initialization logic
 main() {
     echo -e "${BOLD}Starting Mimir initialization...${NC}"
     echo "==============================="
     
+    log "Script directory: $SCRIPT_DIR"
     log "Root directory: $ROOT_DIR"
-    log "Scripts directory: $SCRIPT_DIR"
     
-    # We're already in the root directory, but let's verify
+    # Change to root directory
     cd "$ROOT_DIR"
-    log "Verified working directory: $(pwd)"
+    log "Changed to root directory: $(pwd)"
 
     # First check all dependencies
     echo -e "\n${YELLOW}Checking dependencies...${NC}"

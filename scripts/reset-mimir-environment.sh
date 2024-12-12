@@ -4,14 +4,6 @@
 VERBOSE=0
 FORCE=0
 
-# Color codes for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-BOLD='\033[1m'
-NC='\033[0m' # No Color
-
 # Parse command line arguments
 while getopts "vf" opt; do
     case $opt in
@@ -28,29 +20,19 @@ while getopts "vf" opt; do
     esac
 done
 
+# Color codes for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+BOLD='\033[1m'
+NC='\033[0m' # No Color
+
 # Function for verbose logging
 log() {
     if [ $VERBOSE -eq 1 ]; then
         echo -e "${BLUE}[DEBUG] $1${NC}"
     fi
-}
-
-# Function to remove directory contents but keep the directory
-clean_directory() {
-    local dir=$1
-    if [ -d "$dir" ]; then
-        log "Cleaning directory: $dir"
-        # Remove everything except .gitkeep
-        find "$dir" -mindepth 1 -not -name '.gitkeep' -exec rm -rf {} +
-        log "Directory cleaned: $dir"
-    else
-        log "Directory does not exist: $dir"
-        mkdir -p "$dir"
-        log "Created directory: $dir"
-    fi
-    # Ensure .gitkeep exists
-    touch "$dir/.gitkeep"
-    log "Ensured .gitkeep exists in: $dir"
 }
 
 # Function to confirm action with custom warning
@@ -91,7 +73,89 @@ confirm() {
     return 0
 }
 
-# Function to reset environment
+# Function to check if we need sudo for a directory
+needs_sudo() {
+    local dir=$1
+    if [ -d "$dir" ] && ! [ -w "$dir" ]; then
+        return 0  # True, needs sudo
+    fi
+    return 1     # False, doesn't need sudo
+}
+
+# Function to clean directory with proper permissions
+clean_directory() {
+    local dir=$1
+    if [ -d "$dir" ]; then
+        log "Cleaning directory: $dir"
+        
+        # First try to stop any processes that might be using the directory
+        if command -v docker-compose &> /dev/null; then
+            log "Ensuring containers are stopped..."
+            docker-compose down &> /dev/null || true
+        fi
+
+        # Check directory permissions
+        if ! [ -w "$dir" ] || ! [ -w "$dir"/* 2>/dev/null ]; then
+            log "Using elevated permissions to clean: $dir"
+            echo -e "${YELLOW}Using elevated permissions to clean $dir${NC}"
+            
+            # Use sudo to remove and recreate the directory
+            sudo rm -rf "$dir" || {
+                echo -e "${RED}Failed to remove directory with sudo: $dir${NC}"
+                return 1
+            }
+            
+            # Recreate directory with proper permissions
+            sudo mkdir -p "$dir" || {
+                echo -e "${RED}Failed to create directory with sudo: $dir${NC}"
+                return 1
+            }
+            
+            # Set proper ownership
+            sudo chown -R "$USER:$USER" "$dir" || {
+                echo -e "${RED}Failed to set ownership: $dir${NC}"
+                return 1
+            }
+            
+            # Set directory permissions
+            sudo chmod -R 755 "$dir" || {
+                echo -e "${RED}Failed to set permissions: $dir${NC}"
+                return 1
+            }
+            
+            log "Successfully cleaned directory with elevated permissions: $dir"
+        else
+            # Regular cleanup for directories we own
+            log "Cleaning directory with regular permissions: $dir"
+            rm -rf "$dir"/* || {
+                echo -e "${RED}Failed to clean directory: $dir${NC}"
+                return 1
+            }
+        fi
+        
+    else
+        log "Directory does not exist, creating: $dir"
+        mkdir -p "$dir" || {
+            echo -e "${RED}Failed to create directory: $dir${NC}"
+            return 1
+        }
+    fi
+    
+    # Ensure .gitkeep exists and has correct permissions
+    touch "$dir/.gitkeep" || {
+        echo -e "${RED}Failed to create .gitkeep in: $dir${NC}"
+        return 1
+    }
+    chmod 644 "$dir/.gitkeep" || {
+        echo -e "${RED}Failed to set permissions on .gitkeep in: $dir${NC}"
+        return 1
+    }
+    
+    log "Successfully processed directory: $dir"
+    return 0
+}
+
+# Main reset function
 reset_environment() {
     echo -e "${BLUE}${BOLD}Mimir Environment Reset Tool${NC}"
     echo -e "${YELLOW}===========================================${NC}"
@@ -107,14 +171,14 @@ reset_environment() {
     cd "$ROOT_DIR"
     log "Changed working directory to: $(pwd)"
 
-    # List of files/directories to remove completely
-    declare -a items_to_remove=(
+    # List of files to remove completely
+    declare -a files_to_remove=(
         ".env"
         "node_modules"
         "package-lock.json"
     )
 
-    # List of directories to clean but preserve
+    # List of directories to clean
     declare -a dirs_to_clean=(
         "algod-data"
         "conduit-data"
@@ -124,13 +188,16 @@ reset_environment() {
         echo -e "${BOLD}Current working directory: ${YELLOW}$(pwd)${NC}"
         
         echo -e "\nThe following items will be removed:"
-        for item in "${items_to_remove[@]}"; do
+        for item in "${files_to_remove[@]}"; do
             echo -e "${YELLOW}- $item${NC}"
         done
         echo -e "\nThe following directories will be cleaned:"
         for dir in "${dirs_to_clean[@]}"; do
             echo -e "${YELLOW}- ${dir}/*${NC}"
         done
+        
+        # Check if we'll need sudo
+        echo -e "\n${YELLOW}Note: Some operations may require elevated permissions${NC}"
         
         # Require explicit double confirmation
         if ! confirm "Preparing to reset environment" "START_FRESH"; then
@@ -152,8 +219,8 @@ reset_environment() {
         log "docker-compose not found, skipping container shutdown"
     fi
 
-    # Remove files and directories completely
-    for item in "${items_to_remove[@]}"; do
+    # Remove regular files
+    for item in "${files_to_remove[@]}"; do
         local full_path="$ROOT_DIR/$item"
         if [ -e "$full_path" ]; then
             log "Removing: $full_path"
@@ -164,13 +231,13 @@ reset_environment() {
         fi
     done
 
-    # Clean preserved directories
+    # Clean directories that might need elevated permissions
     for dir in "${dirs_to_clean[@]}"; do
         clean_directory "$ROOT_DIR/$dir"
     done
 
     echo -e "\n${GREEN}${BOLD}Environment reset complete!${NC}"
-    echo -e "You can now run ${YELLOW}init.sh${NC} to reinitialize the environment."
+    echo -e "You can now run ${YELLOW}mimir init${NC} to reinitialize the environment."
     return 0
 }
 
