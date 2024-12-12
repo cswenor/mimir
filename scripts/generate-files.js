@@ -1,20 +1,40 @@
 const fs = require('fs');
+const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
 const path = require('path');
 
-// Get the root directory (one level up from scripts)
-const rootDir = path.join(__dirname, '..');
+// Get project directories
+const ROOT_DIR = path.join(__dirname, '..');
+const DOCKER_DIR = path.join(ROOT_DIR, 'supabase', 'docker');
+const ALGOD_DATA_DIR = path.join(ROOT_DIR, 'algod-data'); // Changed to root directory
 
-// Configure dotenv to look in the root directory
-require('dotenv').config({ path: path.join(rootDir, '.env') });
+// Function to generate a secure random string
+function generateSecret(length = 32) {
+    return crypto.randomBytes(length).toString('base64');
+}
 
-// Debug logging for environment variables
-console.log('Loading environment from:', path.join(rootDir, '.env'));
-if (process.env.DEBUG) {
-    console.log('Environment variables loaded:', {
-        NODE_TOKEN: process.env.NODE_TOKEN ? 'set' : 'not set',
-        NODE_ADMIN_TOKEN: process.env.NODE_ADMIN_TOKEN ? 'set' : 'not set',
-        POSTGRES_PASSWORD: process.env.POSTGRES_PASSWORD ? 'set' : 'not set'
-    });
+// Function to generate a Voi node token
+function generateNodeToken() {
+    return crypto.randomBytes(32).toString('hex');
+}
+
+// Function to generate JWT tokens
+function generateJWTTokens(secret) {
+    const anonToken = jwt.sign({
+        role: 'anon',
+        iss: 'supabase',
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + (10 * 365 * 24 * 60 * 60), // 10 years
+    }, secret);
+
+    const serviceToken = jwt.sign({
+        role: 'service_role',
+        iss: 'supabase',
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + (10 * 365 * 24 * 60 * 60), // 10 years
+    }, secret);
+
+    return { anonToken, serviceToken };
 }
 
 // Function to ensure directory exists
@@ -30,12 +50,9 @@ function ensureDirectoryExists(dirPath) {
     }
 }
 
-// Function to write token file
+// Function to write token to file
 function writeTokenFile(filePath, token) {
     try {
-        if (!token) {
-            throw new Error(`No token provided for ${filePath}`);
-        }
         fs.writeFileSync(filePath, token, { encoding: 'utf8', mode: 0o600 });
         console.log(`Written token to: ${filePath}`);
     } catch (err) {
@@ -44,78 +61,74 @@ function writeTokenFile(filePath, token) {
     }
 }
 
-// Function to generate conduit config
-function generateConduitConfig() {
-    // This is a placeholder for the actual conduit configuration
-    return `
-version: 3
-network: voi
-follow:
-  data-dir: /algod/data
-  node-url: "/algorand"
-  node-token: "${process.env.NODE_TOKEN}"
-process:
-  max-connection-idle-time: 0
-  filter:
-    # add any desired filters
-    min-round: 0
-import:
-  mode: "postgres"
-  postgres:
-    connection-string: "host=postgres port=5432 user=postgres password=${process.env.POSTGRES_PASSWORD} dbname=postgres sslmode=disable"
-    max-conn: 10
-    min-conn: 1
-`;
-}
-
-try {
-    // First verify .env file exists
-    const envFile = path.join(rootDir, '.env');
-    if (!fs.existsSync(envFile)) {
-        throw new Error(`.env file not found at ${envFile}. Please run generate-env.js first.`);
+// Read the template file from the templates directory
+const templatePath = path.join(ROOT_DIR, 'templates', '.env.template');
+fs.readFile(templatePath, 'utf8', (err, data) => {
+    if (err) {
+        console.error('Error reading .env.template:', err);
+        return;
     }
 
-    // Check if required environment variables exist
-    const requiredEnvVars = ['NODE_TOKEN', 'NODE_ADMIN_TOKEN', 'POSTGRES_PASSWORD'];
-    const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
-    
-    if (missingVars.length > 0) {
-        throw new Error(
-            `Missing required environment variables: ${missingVars.join(', ')}\n` +
-            `Checked .env file at: ${envFile}\n` +
-            'Please ensure these variables are set in your .env file.'
-        );
+    try {
+        // Generate secrets
+        const postgresPassword = generateSecret();
+        const jwtSecret = generateSecret();
+        const dashboardPassword = generateSecret(24);
+        const localLogflareKey = generateSecret(16);
+
+        // Generate Voi node tokens
+        const nodeToken = generateNodeToken();
+        const nodeAdminToken = generateNodeToken();
+
+        // Generate JWT tokens
+        const { anonToken, serviceToken } = generateJWTTokens(jwtSecret);
+
+        // Replace the placeholder values
+        const newEnv = data
+            .replace('your-super-secret-and-long-postgres-password', postgresPassword)
+            .replace('your-super-secret-jwt-token-with-at-least-32-characters', jwtSecret)
+            .replace('this-is-a-secure-dashboard-password', dashboardPassword)
+            .replace('your-super-secret-logflare-key', localLogflareKey)
+            .replace(/NODE_TOKEN=.*/, `NODE_TOKEN=${nodeToken}`)
+            .replace(/NODE_ADMIN_TOKEN=.*/, `NODE_ADMIN_TOKEN=${nodeAdminToken}`)
+            .replace(/ANON_KEY=.*/, `ANON_KEY=${anonToken}`)
+            .replace(/SERVICE_ROLE_KEY=.*/, `SERVICE_ROLE_KEY=${serviceToken}`);
+
+        // Create the algod data directory in the root
+        ensureDirectoryExists(ALGOD_DATA_DIR);
+
+        // Write token files to root directory
+        writeTokenFile(path.join(ALGOD_DATA_DIR, 'algod.token'), nodeToken);
+        writeTokenFile(path.join(ALGOD_DATA_DIR, 'algod.admin.token'), nodeAdminToken);
+
+        // Write the .env file to the docker directory
+        const dockerEnvPath = path.join(DOCKER_DIR, '.env');
+        fs.writeFileSync(dockerEnvPath, newEnv, 'utf8');
+        console.log('Successfully generated .env file in docker directory!');
+
+        // Log the generated values
+        console.log('\nGenerated values:');
+        console.log('=================');
+        console.log('POSTGRES_PASSWORD:', postgresPassword);
+        console.log('JWT_SECRET:', jwtSecret);
+        console.log('DASHBOARD_PASSWORD:', dashboardPassword);
+        console.log('\nVoi Node Configuration:');
+        console.log('NODE_TOKEN:', nodeToken);
+        console.log('NODE_ADMIN_TOKEN:', nodeAdminToken);
+        console.log('Token files created in:', ALGOD_DATA_DIR);
+        console.log('\nANON_KEY:', anonToken);
+        console.log('\nSERVICE_ROLE_KEY:', serviceToken);
+        console.log('\nLocal Analytics Configuration:');
+        console.log('LOGFLARE_API_KEY:', localLogflareKey);
+
+        console.log('\nNOTE: This setup uses Postgres as the analytics backend.');
+        console.log('If you want to use Logflare\'s hosted service:');
+        console.log('1. Sign up at https://logflare.app');
+        console.log('2. Get your API key from the Logflare dashboard');
+        console.log('3. Replace the LOGFLARE_API_KEY in .env with your actual key');
+        console.log('4. Uncomment the BigQuery configuration in docker-compose.yml');
+    } catch (error) {
+        console.error('An error occurred:', error);
+        process.exit(1);
     }
-
-    // Ensure algod data directory exists
-    const algodDataDir = path.join(rootDir, 'algod-data');
-    ensureDirectoryExists(algodDataDir);
-
-    // Ensure conduit data directory exists
-    const conduitDataDir = path.join(rootDir, 'conduit-data');
-    ensureDirectoryExists(conduitDataDir);
-
-    // Write token files
-    writeTokenFile(
-        path.join(algodDataDir, 'algod.token'),
-        process.env.NODE_TOKEN
-    );
-    writeTokenFile(
-        path.join(algodDataDir, 'algod.admin.token'),
-        process.env.NODE_ADMIN_TOKEN
-    );
-
-    // Generate and write conduit config
-    const conduitConfig = generateConduitConfig();
-    fs.writeFileSync(
-        path.join(conduitDataDir, 'conduit.yml'),
-        conduitConfig,
-        'utf8'
-    );
-    console.log('Generated conduit.yml');
-
-    console.log('Successfully generated all required files!');
-} catch (error) {
-    console.error('Error generating files:', error);
-    process.exit(1);
-}
+});
