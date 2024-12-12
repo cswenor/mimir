@@ -1,3 +1,5 @@
+name: mimir
+
 services:
   voi-node:
     image: ghcr.io/voinetwork/voi-node:latest
@@ -16,29 +18,26 @@ services:
     networks:
       - voi-conduit-net
 
-  # conduit:
-  #   image: algorand/conduit:latest
-  #   volumes:
-  #     - type: bind
-  #       source: ./conduit-data
-  #       target: /conduit/data
-  #   networks:
-  #     - voi-conduit-net
-  #     - supabase
-  #   command: [
-  #     "-d", "/conduit/data"
-  #   ]
-  #   restart: always
-  #   logging:
-  #     driver: local
-  #   depends_on:
-  #     - voi-node
+  conduit:
+    image: algorand/conduit:latest
+    volumes:
+      - type: bind
+        source: ./conduit-data
+        target: /conduit/data
+    networks:
+      - voi-conduit-net
+      - supabase_default
+    command: [ "-d", "/conduit/data" ]
+    restart: always
+    logging:
+      driver: local
+    depends_on:
+      - voi-node
 
 networks:
-  voi-conduit-net:        
+  voi-conduit-net:
     name: voi-conduit-net
     driver: bridge
-    internal: true        
-  supabase:
-    name: supabase_default
+    internal: true
+  supabase_default:
     external: true

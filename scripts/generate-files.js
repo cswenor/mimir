@@ -1,12 +1,17 @@
+// Built-in modules
 const fs = require('fs');
-const crypto = require('crypto');
-const jwt = require('jsonwebtoken');
 const path = require('path');
+const crypto = require('node:crypto');
+
+// External modules
+const jwt = require('jsonwebtoken');
 
 // Get project directories
 const ROOT_DIR = path.join(__dirname, '..');
 const DOCKER_DIR = path.join(ROOT_DIR, 'supabase', 'docker');
-const ALGOD_DATA_DIR = path.join(ROOT_DIR, 'algod-data'); // Changed to root directory
+const ALGOD_DATA_DIR = path.join(ROOT_DIR, 'algod-data');
+const CONDUIT_DATA_DIR = path.join(ROOT_DIR, 'conduit-data');
+const TEMPLATES_DIR = path.join(ROOT_DIR, 'templates');
 
 // Function to generate a secure random string
 function generateSecret(length = 32) {
@@ -61,8 +66,38 @@ function writeTokenFile(filePath, token) {
     }
 }
 
+// Function to generate conduit config using yaml parser
+function generateConduitConfig(nodeToken, nodeAdminToken, postgresPassword) {
+    try {
+        const templatePath = path.join(TEMPLATES_DIR, 'conduit.yml.template');
+        let templateContent = fs.readFileSync(templatePath, 'utf8');
+
+        // Simple replacements for the variables
+        const replacements = {
+            NODE_TOKEN: nodeToken,
+            NODE_ADMIN_TOKEN: nodeAdminToken,
+            POSTGRES_HOST: 'db',
+            POSTGRES_PASSWORD: postgresPassword,
+            POSTGRES_DB: 'postgres'
+        };
+
+        // Replace each variable in the template
+        for (const [key, value] of Object.entries(replacements)) {
+            templateContent = templateContent.replace(
+                new RegExp(`\\$\\{${key}\\}`, 'g'),
+                value
+            );
+        }
+
+        return templateContent;
+    } catch (err) {
+        console.error('Error generating conduit config:', err);
+        throw err;
+    }
+}
+
 // Read the template file from the templates directory
-const templatePath = path.join(ROOT_DIR, 'templates', '.env.template');
+const templatePath = path.join(TEMPLATES_DIR, '.env.template');
 fs.readFile(templatePath, 'utf8', (err, data) => {
     if (err) {
         console.error('Error reading .env.template:', err);
@@ -94,12 +129,18 @@ fs.readFile(templatePath, 'utf8', (err, data) => {
             .replace(/ANON_KEY=.*/, `ANON_KEY=${anonToken}`)
             .replace(/SERVICE_ROLE_KEY=.*/, `SERVICE_ROLE_KEY=${serviceToken}`);
 
-        // Create the algod data directory in the root
+        // Create necessary directories
         ensureDirectoryExists(ALGOD_DATA_DIR);
+        ensureDirectoryExists(CONDUIT_DATA_DIR);
 
-        // Write token files to root directory
+        // Write token files
         writeTokenFile(path.join(ALGOD_DATA_DIR, 'algod.token'), nodeToken);
         writeTokenFile(path.join(ALGOD_DATA_DIR, 'algod.admin.token'), nodeAdminToken);
+
+        // Generate and write conduit config
+        const conduitConfig = generateConduitConfig(nodeToken, nodeAdminToken, postgresPassword);
+        fs.writeFileSync(path.join(CONDUIT_DATA_DIR, 'conduit.yml'), conduitConfig, 'utf8');
+        console.log('Generated conduit.yml');
 
         // Write the .env file to the docker directory
         const dockerEnvPath = path.join(DOCKER_DIR, '.env');
@@ -120,6 +161,8 @@ fs.readFile(templatePath, 'utf8', (err, data) => {
         console.log('\nSERVICE_ROLE_KEY:', serviceToken);
         console.log('\nLocal Analytics Configuration:');
         console.log('LOGFLARE_API_KEY:', localLogflareKey);
+        console.log('\nConduit Configuration:');
+        console.log('Config file created in:', CONDUIT_DATA_DIR);
 
         console.log('\nNOTE: This setup uses Postgres as the analytics backend.');
         console.log('If you want to use Logflare\'s hosted service:');

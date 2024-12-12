@@ -49,6 +49,51 @@ cmd_status() {
     fi
 }
 
+cmd_start() {
+    echo -e "${BLUE}${BOLD}Starting Mimir services...${NC}"
+    
+    cd "$MIMIR_HOME" || error "Failed to change to Mimir home directory"
+
+    # Start Supabase first
+    echo -e "${YELLOW}Starting Supabase services...${NC}"
+    if [ -d "supabase/docker" ]; then
+        (cd supabase/docker && docker compose up -d) || error "Failed to start Supabase services"
+    else
+        error "Supabase docker directory not found. Have you run 'mimir init'?"
+    fi
+    
+    # Wait a moment for networks to be created
+    echo -e "${YELLOW}Waiting for services to initialize...${NC}"
+    sleep 3
+    
+    # Now start Mimir services
+    echo -e "${YELLOW}Starting Mimir services...${NC}"
+    docker compose up -d || error "Failed to start Mimir services"
+    
+    echo -e "${GREEN}All services started successfully!${NC}"
+}
+
+cmd_stop() {
+    echo -e "${BLUE}${BOLD}Stopping Mimir services...${NC}"
+    
+    cd "$MIMIR_HOME" || error "Failed to change to Mimir home directory"
+
+    # Stop Mimir services first
+    echo -e "${YELLOW}Stopping Mimir services...${NC}"
+    docker compose down || error "Failed to stop Mimir services"
+    
+    # Then stop Supabase
+    echo -e "${YELLOW}Stopping Supabase services...${NC}"
+    if [ -d "supabase/docker" ]; then
+        (cd supabase/docker && docker compose down) || error "Failed to stop Supabase services"
+    else
+        echo -e "${YELLOW}Supabase docker directory not found, skipping...${NC}"
+    fi
+    
+    echo -e "${GREEN}All services stopped successfully!${NC}"
+}
+
+
 cmd_init() {
     # Parse flags for init command
     VERBOSE=0
@@ -107,6 +152,8 @@ show_usage() {
     echo
     echo "Commands:"
     echo "  init        Initialize or reinitialize the Mimir environment"
+    echo "  start       Start all services (Supabase and Mimir)"
+    echo "  stop        Stop all services"
     echo "  reset       Reset the Mimir environment (requires confirmation)"
     echo "  status      Check the status of the Voi node"
     echo "  help        Show this help message"
@@ -126,6 +173,12 @@ case "$1" in
     init)
         shift
         cmd_init "$@"
+        ;;
+    start)
+        cmd_start
+        ;;
+    stop)
+        cmd_stop
         ;;
     reset)
         shift

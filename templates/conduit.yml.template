@@ -1,0 +1,33 @@
+# Log verbosity: PANIC, FATAL, ERROR, WARN, INFO, DEBUG, TRACE
+log-level: INFO
+retry-count: 10
+retry-delay: "1s"
+hide-banner: false
+
+api:
+    addr: ":8981"
+
+metrics:
+    mode: OFF
+    addr: ":9999"
+    prefix: "conduit"
+
+importer:
+    name: algod
+    config:
+        mode: "follower"
+        netaddr: "http://voi-node:8080"
+        token: "${NODE_TOKEN}"
+        catchup-config:
+            admin-token: "${NODE_ADMIN_TOKEN}"
+
+processors:
+
+exporter:
+    name: postgresql
+    config:
+        connection-string: "host=${POSTGRES_HOST} port=5432 user=postgres password=${POSTGRES_PASSWORD} dbname=${POSTGRES_DB}"
+        max-conn: 20
+        delete-task:
+            interval: 0
+            rounds: 100000

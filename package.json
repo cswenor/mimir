@@ -1,26 +1,23 @@
-
-  {
+{
     "name": "mimir",
     "version": "1.0.0",
     "description": "A flexible indexer for AVM blockchains",
     "scripts": {
-      "init": "./scripts/init.sh",
-      "generate-env": "node scripts/generate-env.js",
-      "generate-files": "node scripts/generate-files.js",
-      "check-deps": "./scripts/check-dependencies.sh"
+        "init": "./scripts/init.sh",
+        "generate-env": "node scripts/generate-env.js",
+        "generate-files": "node scripts/generate-files.js"
     },
     "dependencies": {
-      "dotenv": "^16.0.3",
-      "jsonwebtoken": "^9.0.0",
-      "crypto": "^1.0.1"
+        "dotenv": "^16.0.3",
+        "jsonwebtoken": "^9.0.0"
     },
     "devDependencies": {
-      "prettier": "^2.8.8"
+        "prettier": "^2.8.8"
     },
     "engines": {
-      "node": ">=16.0.0"
+        "node": ">=16.0.0"
     },
     "private": true,
     "author": "Chris Swenor",
     "license": "MIT"
-  }  
+}
