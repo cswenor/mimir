@@ -20,6 +20,7 @@ package-lock.json
 !/conduit-data/.gitkeep
 
 # Supabase
+supabase
 /supabase/volumes/
 /supabase/seed.sql
 /supabase/.temp/

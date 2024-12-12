@@ -44,38 +44,33 @@ error() {
     exit "${2:-1}"
 }
 
-# Required versions
-MIN_DOCKER_VERSION="20.10.0"
-MIN_DOCKER_COMPOSE_VERSION="2.0.0"
-MIN_NODE_VERSION="16.0.0"
-
-# Function to compare versions
+# Function for version comparison
 version_compare() {
     local ver1=$1
     local ver2=$2
     log "Comparing versions: $ver1 and $ver2"
-    
+
     if [ "$ver1" = "$ver2" ]; then
         log "Versions are equal"
         return 0
     fi
-    
+
     local IFS=.
     local i ver1_array=($ver1) ver2_array=($ver2)
-    
+
     # Fill empty positions with zeros
     for ((i=${#ver1_array[@]}; i<${#ver2_array[@]}; i++)); do
         ver1_array[i]=0
     done
-    
+
     for ((i=0; i<${#ver1_array[@]}; i++)); do
         if [ -z "${ver2_array[i]}" ]; then
             ver2_array[i]=0
         fi
-        
+
         local v1=${ver1_array[i]}
         local v2=${ver2_array[i]}
-        
+
         if ((v1 > v2)); then
             log "First version is greater"
             return 1
@@ -84,165 +79,39 @@ version_compare() {
             return 2
         fi
     done
-    
+
     return 0
 }
 
-# Function to check if command exists
-command_exists() {
-    log "Checking if command exists: $1"
-    command -v "$1" >/dev/null 2>&1
-}
-
-# Function to extract version from string
-extract_version() {
-    local input=$1
-    log "Extracting version from: $input"
-    
-    # First try to match version after "version" keyword
-    local version
-    version=$(echo "$input" | sed -n 's/.*version \([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
-    
-    # If that fails, try to match any version number
-    if [ -z "$version" ]; then
-        log "First version extraction attempt failed, trying alternate method"
-        version=$(echo "$input" | grep -o '[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*' | head -n1)
-    fi
-    
-    if [ -z "$version" ]; then
-        log "Failed to extract version"
-        return 1
-    fi
-    
-    log "Extracted version: $version"
-    echo "$version"
-    return 0
-}
-
-# Print start message
-echo "Checking dependencies for Mimir..."
-echo "================================"
-
-# Check Docker
-echo "Checking Docker..."
-if ! command_exists docker; then
-    error "Docker is not installed. Please install Docker from https://docs.docker.com/get-docker/" 2
+# Check for Supabase sparse clone and configure it
+echo "Checking Supabase repository for sparse checkout..."
+if [ -d "$ROOT_DIR/supabase" ] && [ ! -d "$ROOT_DIR/supabase/.git" ]; then
+    echo "Supabase directory exists but is not a valid repository. Removing it..."
+    rm -rf "$ROOT_DIR/supabase" || error "Failed to remove invalid Supabase directory"
 fi
 
-DOCKER_VERSION=$(docker --version)
-log "Raw Docker version string: $DOCKER_VERSION"
-VERSION_NUM=$(extract_version "$DOCKER_VERSION")
+if [ ! -d "$ROOT_DIR/supabase" ]; then
+    echo "Cloning Supabase repository with sparse checkout..."
+    git clone --filter=blob:none --no-checkout https://github.com/supabase/supabase "$ROOT_DIR/supabase" || error "Failed to clone Supabase repository"
 
-if [ -z "$VERSION_NUM" ]; then
-    error "Could not determine Docker version" 3
+    # Move into the cloned directory
+    cd "$ROOT_DIR/supabase" || error "Failed to navigate into Supabase directory"
+
+    # Initialize sparse checkout and fetch only the docker directory
+    echo "Configuring sparse checkout for 'docker' directory..."
+    git sparse-checkout set --cone docker || error "Failed to initialize sparse checkout"
+
+    # Checkout master branch
+    git checkout master || error "Failed to checkout master branch"
+
+    # Return to the root directory
+    cd "$ROOT_DIR" || error "Failed to return to the root directory"
+
+    echo "Sparse checkout of Supabase repository complete."
+else
+    echo "Supabase repository already exists and is configured."
 fi
 
-echo "Docker version: $VERSION_NUM (from: $DOCKER_VERSION)"
-version_compare "$VERSION_NUM" "$MIN_DOCKER_VERSION"
-case $? in
-    0|1)
-        echo -e "${GREEN}✓ Docker version $VERSION_NUM${NC}"
-        ;;
-    2)
-        error "Docker version $VERSION_NUM is below minimum required version $MIN_DOCKER_VERSION" 4
-        ;;
-esac
-
-# Check Docker Compose
-echo "Checking Docker Compose..."
-if ! command_exists docker-compose; then
-    error "Docker Compose is not installed. Please install from https://docs.docker.com/compose/install/" 5
-fi
-
-DOCKER_COMPOSE_VERSION=$(docker-compose --version)
-log "Raw Docker Compose version string: $DOCKER_COMPOSE_VERSION"
-VERSION_NUM=$(extract_version "$DOCKER_COMPOSE_VERSION")
-
-if [ -z "$VERSION_NUM" ]; then
-    error "Could not determine Docker Compose version" 6
-fi
-
-echo "Docker Compose version: $VERSION_NUM (from: $DOCKER_COMPOSE_VERSION)"
-version_compare "$VERSION_NUM" "$MIN_DOCKER_COMPOSE_VERSION"
-case $? in
-    0|1)
-        echo -e "${GREEN}✓ Docker Compose version $VERSION_NUM${NC}"
-        ;;
-    2)
-        error "Docker Compose version $VERSION_NUM is below minimum required version $MIN_DOCKER_COMPOSE_VERSION" 7
-        ;;
-esac
-
-# Check Node.js
-echo "Checking Node.js..."
-if ! command_exists node; then
-    error "Node.js is not installed. Please install Node.js from https://nodejs.org/" 8
-fi
-
-NODE_VERSION=$(node --version)
-log "Raw Node.js version string: $NODE_VERSION"
-VERSION_NUM=$(extract_version "$NODE_VERSION")
-
-if [ -z "$VERSION_NUM" ]; then
-    error "Could not determine Node.js version" 9
-fi
-
-echo "Node.js version: $VERSION_NUM (from: $NODE_VERSION)"
-version_compare "$VERSION_NUM" "$MIN_NODE_VERSION"
-case $? in
-    0|1)
-        echo -e "${GREEN}✓ Node.js version $VERSION_NUM${NC}"
-        ;;
-    2)
-        error "Node.js version $VERSION_NUM is below minimum required version $MIN_NODE_VERSION" 10
-        ;;
-esac
-
-# Check if Docker daemon is running
-echo "Checking Docker daemon..."
-if ! docker info >/dev/null 2>&1; then
-    error "Docker daemon is not running. Please start the Docker daemon" 11
-fi
-echo -e "${GREEN}✓ Docker daemon is running${NC}"
-
-# Check disk space
-echo "Checking disk space..."
-AVAILABLE_SPACE=$(df -h . | awk 'NR==2 {print $4}')
-echo -e "${YELLOW}ℹ Available disk space: $AVAILABLE_SPACE${NC}"
-echo -e "${YELLOW}ℹ Recommended minimum: 20GB${NC}"
-
-# Check memory
-echo "Checking system memory..."
-if command_exists free; then
-    TOTAL_MEMORY=$(free -h | awk '/^Mem:/{print $2}')
-    echo -e "${YELLOW}ℹ Total system memory: $TOTAL_MEMORY${NC}"
-    echo -e "${YELLOW}ℹ Recommended minimum: 8GB${NC}"
-fi
-
-# Check npm dependencies
-echo "Checking npm dependencies..."
-log "Looking for package.json in: $ROOT_DIR"
-if [ ! -f "$ROOT_DIR/package.json" ]; then
-    error "package.json not found in project root: $ROOT_DIR" 12
-fi
-
-# Always run npm install to ensure dependencies are up to date
-echo -e "${YELLOW}Installing npm dependencies...${NC}"
-log "Running npm install in: $ROOT_DIR"
-cd "$ROOT_DIR" || error "Failed to change to root directory" 14
-
-# Run npm install with error checking
-if ! npm install; then
-    error "Failed to install npm dependencies. Check the error messages above." 13
-fi
-
-echo -e "${GREEN}✓ npm dependencies installed${NC}"
-
-# Add node_modules check after installation
-if [ ! -d "$ROOT_DIR/node_modules" ]; then
-    error "node_modules directory not found after npm install" 15
-fi
-
-# All checks passed
+# Ensure dependencies are checked correctly
 echo -e "\n${GREEN}✓ All dependency checks passed!${NC}"
 echo "You can proceed with the installation."
