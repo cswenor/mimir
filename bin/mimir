@@ -44,7 +44,7 @@ cmd_status() {
     echo "================================"
 
     # Run goal node status inside the container
-    if ! docker exec "$container_name" goal node status; then
+    if ! docker exec -it "$container_name" /node/bin/goal -d /algod/data node status; then
         error "Failed to get node status"
     fi
 }
