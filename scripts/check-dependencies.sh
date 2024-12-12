@@ -112,6 +112,31 @@ else
     echo "Supabase repository already exists and is configured."
 fi
 
+# Check npm dependencies
+echo "Checking npm dependencies..."
+log "Looking for package.json in: $ROOT_DIR"
+
+if [ ! -f "$ROOT_DIR/package.json" ]; then
+    error "package.json not found in project root: $ROOT_DIR" 12
+fi
+
+# Always run npm install to ensure dependencies are up to date
+echo -e "${YELLOW}Installing npm dependencies...${NC}"
+log "Running npm install in: $ROOT_DIR"
+cd "$ROOT_DIR" || error "Failed to change to root directory" 14
+
+# Run npm install with error checking
+if ! npm install; then
+    error "Failed to install npm dependencies. Check the error messages above." 13
+fi
+
+echo -e "${GREEN}✓ npm dependencies installed${NC}"
+
+# Add node_modules check after installation
+if [ ! -d "$ROOT_DIR/node_modules" ]; then
+    error "node_modules directory not found after npm install" 15
+fi
+
 # Ensure dependencies are checked correctly
 echo -e "\n${GREEN}✓ All dependency checks passed!${NC}"
 echo "You can proceed with the installation."

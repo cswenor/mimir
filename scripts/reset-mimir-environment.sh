@@ -48,7 +48,7 @@ confirm() {
     echo -e "${RED}3. Remove all environment configurations${NC}"
     echo -e "${RED}4. Remove all dependencies${NC}"
     echo -e "${RED}5. Reset all generated files${NC}"
-    echo -e "${RED}6. Clean Supabase volumes and configurations${NC}"
+    echo -e "${RED}6. Clean Supabase directory and configurations${NC}"
     
     echo -e "\n${YELLOW}${BOLD}To verify this action:${NC}"
     echo -e "1. Type ${BOLD}'RESET-MIMIR'${NC} to confirm you want to reset"
@@ -74,74 +74,28 @@ confirm() {
     return 0
 }
 
-# Function to check if we need sudo for a directory
-needs_sudo() {
-    local dir=$1
-    if [ -d "$dir" ] && ! [ -w "$dir" ]; then
-        return 0  # True, needs sudo
-    fi
-    return 1     # False, doesn't need sudo
-}
-
-# Function to clean directory with proper permissions
+# Function to clean a directory completely
 clean_directory() {
     local dir=$1
-    local keep_gitkeep=${2:-1}  # Default to keeping .gitkeep
-
+    local preserve_gitkeep=${2:-0}  # Default to not preserving .gitkeep
     if [ -d "$dir" ]; then
-        log "Cleaning directory: $dir"
-        
-        # First try to stop any processes that might be using the directory
-        if command -v docker-compose &> /dev/null; then
-            log "Ensuring containers are stopped..."
-            docker-compose down &> /dev/null || true
-        fi
-
-        # Check directory permissions
-        if ! [ -w "$dir" ] || ! [ -w "$dir"/* 2>/dev/null ]; then
-            log "Using elevated permissions to clean: $dir"
-            echo -e "${YELLOW}Using elevated permissions to clean $dir${NC}"
-            
-            sudo rm -rf "$dir" || {
-                echo -e "${RED}Failed to remove directory with sudo: $dir${NC}"
-                return 1
-            }
-            
-            sudo mkdir -p "$dir" || {
-                echo -e "${RED}Failed to create directory with sudo: $dir${NC}"
-                return 1
-            }
-            
-            sudo chown -R "$USER:$USER" "$dir" || {
-                echo -e "${RED}Failed to set ownership: $dir${NC}"
-                return 1
-            }
-            
-            sudo chmod -R 755 "$dir" || {
-                echo -e "${RED}Failed to set permissions: $dir${NC}"
-                return 1
-            }
-            
-            log "Successfully cleaned directory with elevated permissions: $dir"
-        else
-            # Regular cleanup for directories we own
-            log "Cleaning directory with regular permissions: $dir"
-            rm -rf "$dir"/* || {
-                echo -e "${RED}Failed to clean directory: $dir${NC}"
-                return 1
-            }
-        fi
-        
-    else
-        log "Directory does not exist, creating: $dir"
-        mkdir -p "$dir" || {
-            echo -e "${RED}Failed to create directory: $dir${NC}"
+        log "Removing directory: $dir"
+        rm -rf "$dir" || {
+            echo -e "${RED}Failed to remove directory: $dir${NC}"
             return 1
         }
+        log "Successfully removed directory: $dir"
+    else
+        log "Directory does not exist, skipping: $dir"
     fi
-    
-    # Only create .gitkeep if specifically requested
-    if [ "$keep_gitkeep" -eq 1 ]; then
+
+    # Recreate directory and .gitkeep if needed
+    if [ $preserve_gitkeep -eq 1 ]; then
+        log "Recreating directory and .gitkeep: $dir"
+        mkdir -p "$dir" || {
+            echo -e "${RED}Failed to recreate directory: $dir${NC}"
+            return 1
+        }
         touch "$dir/.gitkeep" || {
             echo -e "${RED}Failed to create .gitkeep in: $dir${NC}"
             return 1
@@ -151,9 +105,6 @@ clean_directory() {
             return 1
         }
     fi
-    
-    log "Successfully processed directory: $dir"
-    return 0
 }
 
 # Main reset function
@@ -172,43 +123,30 @@ reset_environment() {
     cd "$ROOT_DIR"
     log "Changed working directory to: $(pwd)"
 
-    # List of files to remove completely
-    declare -a files_to_remove=(
+    # Directories and files to remove
+    declare -a items_to_remove=(
+        "supabase"  # Completely remove the Supabase directory
         "node_modules"
         "package-lock.json"
-        "supabase/docker/.env"
-        "supabase/docker/docker-compose.override.yml"
-        "supabase/docker/test.http"
+        "supabase/docker/volumes"
     )
 
-    # Directories to clean with .gitkeep
-    declare -a dirs_to_clean_with_gitkeep=(
+    # Directories to clean and keep .gitkeep
+    declare -a dirs_with_gitkeep=(
         "algod-data"
         "conduit-data"
-    )
-
-    # Directories to clean without .gitkeep
-    declare -a dirs_to_clean_without_gitkeep=(
-        "supabase/docker/volumes/db/data"
-        "supabase/docker/volumes/storage"
-        "supabase/docker/volumes/api"
-        "supabase/docker/volumes/functions"
     )
 
     if [ $FORCE -ne 1 ]; then
         echo -e "${BOLD}Current working directory: ${YELLOW}$(pwd)${NC}"
         
         echo -e "\nThe following items will be removed:"
-        for item in "${files_to_remove[@]}"; do
+        for item in "${items_to_remove[@]}"; do
             echo -e "${YELLOW}- $item${NC}"
         done
-        echo -e "\nThe following directories will be cleaned (with .gitkeep):"
-        for dir in "${dirs_to_clean_with_gitkeep[@]}"; do
-            echo -e "${YELLOW}- ${dir}/*${NC}"
-        done
-        echo -e "\nThe following directories will be cleaned (without .gitkeep):"
-        for dir in "${dirs_to_clean_without_gitkeep[@]}"; do
-            echo -e "${YELLOW}- ${dir}/*${NC}"
+        echo -e "\nThe following directories will be cleaned and keep .gitkeep:"
+        for dir in "${dirs_with_gitkeep[@]}"; do
+            echo -e "${YELLOW}- $dir${NC}"
         done
         
         # Require explicit double confirmation
@@ -225,35 +163,19 @@ reset_environment() {
     if command -v docker-compose &> /dev/null; then
         log "Stopping Docker containers..."
         docker-compose down &> /dev/null || true
-        if [ -f "supabase/docker/docker-compose.yml" ]; then
-            log "Stopping Supabase services..."
-            (cd supabase/docker && docker-compose down -v --remove-orphans) &> /dev/null || true
-        fi
         log "Docker containers stopped"
     else
         log "docker-compose not found, skipping container shutdown"
     fi
 
-    # Remove regular files
-    for item in "${files_to_remove[@]}"; do
-        local full_path="$ROOT_DIR/$item"
-        if [ -e "$full_path" ]; then
-            log "Removing: $full_path"
-            rm -rf "$full_path"
-            log "Successfully removed: $full_path"
-        else
-            log "Item does not exist, skipping: $full_path"
-        fi
+    # Remove directories and files
+    for item in "${items_to_remove[@]}"; do
+        clean_directory "$ROOT_DIR/$item"
     done
 
-    # Clean directories with .gitkeep
-    for dir in "${dirs_to_clean_with_gitkeep[@]}"; do
+    # Clean directories and recreate .gitkeep
+    for dir in "${dirs_with_gitkeep[@]}"; do
         clean_directory "$ROOT_DIR/$dir" 1
-    done
-
-    # Clean directories without .gitkeep
-    for dir in "${dirs_to_clean_without_gitkeep[@]}"; do
-        clean_directory "$ROOT_DIR/$dir" 0
     done
 
     echo -e "\n${GREEN}${BOLD}Environment reset complete!${NC}"
