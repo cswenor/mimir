@@ -1,0 +1,44 @@
+services:
+  voi-node:
+    image: ghcr.io/voinetwork/voi-node:latest
+    container_name: voi-follower-node
+    environment:
+      - VOINETWORK_NETWORK=mainnet
+      - VOINETWORK_PROFILE=conduit
+      - VOINETWORK_CATCHUP=0
+    volumes:
+      - type: bind
+        source: ./algod-data
+        target: /algod/data
+    restart: always
+    logging:
+      driver: local
+    networks:
+      - voi-conduit-net
+
+  # conduit:
+  #   image: algorand/conduit:latest
+  #   volumes:
+  #     - type: bind
+  #       source: ./conduit-data
+  #       target: /conduit/data
+  #   networks:
+  #     - voi-conduit-net
+  #     - supabase
+  #   command: [
+  #     "-d", "/conduit/data"
+  #   ]
+  #   restart: always
+  #   logging:
+  #     driver: local
+  #   depends_on:
+  #     - voi-node
+
+networks:
+  voi-conduit-net:        
+    name: voi-conduit-net
+    driver: bridge
+    internal: true        
+  supabase:
+    name: supabase_default
+    external: true
