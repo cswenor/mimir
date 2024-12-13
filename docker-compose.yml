@@ -38,6 +38,5 @@ networks:
   voi-conduit-net:
     name: voi-conduit-net
     driver: bridge
-    internal: true
   supabase_default:
     external: true
