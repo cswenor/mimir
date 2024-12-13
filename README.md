@@ -34,7 +34,7 @@ This architecture provides several advantages over traditional indexers:
 1. Clone the repository:
 
     ```bash
-    git clone https://github.com/cswenor/mimir.git
+    git clone git@github.com:cswenor/mimir.git
     cd mimir
     ```
 
