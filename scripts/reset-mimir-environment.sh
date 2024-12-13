@@ -174,7 +174,6 @@ reset_environment() {
     # Directories to clean and keep .gitkeep
     declare -a dirs_with_gitkeep=(
         "algod-data"
-        "conduit-data"
     )
 
     if [ $FORCE -ne 1 ]; then

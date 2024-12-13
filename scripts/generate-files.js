@@ -10,7 +10,7 @@ const jwt = require('jsonwebtoken');
 const ROOT_DIR = path.join(__dirname, '..');
 const DOCKER_DIR = path.join(ROOT_DIR, 'supabase', 'docker');
 const ALGOD_DATA_DIR = path.join(ROOT_DIR, 'algod-data');
-const CONDUIT_DATA_DIR = path.join(ROOT_DIR, 'conduit-data');
+const CONDUIT_DATA_DIR = path.join(ROOT_DIR);
 const TEMPLATES_DIR = path.join(ROOT_DIR, 'templates');
 
 // Function to generate a secure random string

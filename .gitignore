@@ -16,8 +16,7 @@ package-lock.json
 !/algod-data/.gitkeep
 
 # Conduit data directory contents
-/conduit-data/*
-!/conduit-data/.gitkeep
+conduit.yml
 
 # Supabase
 supabase

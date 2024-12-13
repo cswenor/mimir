@@ -21,13 +21,10 @@ services:
   conduit:
     image: algorand/conduit:latest
     volumes:
-      - type: bind
-        source: ./conduit-data
-        target: /conduit/data
+      - ./conduit.yml:/etc/algorand/conduit.yml
     networks:
       - voi-conduit-net
       - supabase_default
-    command: [ "-d", "/conduit/data" ]
     restart: always
     logging:
       driver: local
