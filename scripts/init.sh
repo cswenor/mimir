@@ -101,7 +101,7 @@ main() {
     echo -e "${GREEN}Successfully generated required files${NC}"
 
     echo -e "\n${GREEN}${BOLD}✓ Initialization complete!${NC}"
-    echo -e "You can now start the services with: ${YELLOW}mimir start${NC}"
+    echo -e "You can now start the services with: ${YELLOW}./bin/mimir start${NC}"
 
     # Additional verbose information
     if [ $VERBOSE -eq 1 ]; then
