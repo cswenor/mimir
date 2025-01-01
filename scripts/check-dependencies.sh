@@ -101,6 +101,40 @@ else
     log "jq is already installed"
 fi
 
+# Check for Git
+echo "Checking for Git..."
+if ! command -v git &> /dev/null; then
+    error "Git is not installed. Please install Git: https://git-scm.com/downloads" 17
+fi
+echo -e "${GREEN}✓ Git is installed${NC}"
+
+# Check for Docker
+echo "Checking for Docker..."
+if ! command -v docker &> /dev/null; then
+    error "Docker is not installed. Please install Docker: https://docs.docker.com/get-docker/" 18
+fi
+echo -e "${GREEN}✓ Docker is installed${NC}"
+
+# Check for Docker Compose
+echo "Checking for Docker Compose..."
+if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
+    error "Docker Compose is not installed. Please install Docker Compose: https://docs.docker.com/compose/install/" 19
+fi
+echo -e "${GREEN}✓ Docker Compose is installed${NC}"
+
+# Check Node.js version
+echo "Checking Node.js version..."
+if ! command -v node &> /dev/null; then
+    error "Node.js is not installed. Please install Node.js 16 or higher: https://nodejs.org/" 20
+fi
+
+NODE_VERSION=$(node -v | cut -d 'v' -f 2)
+version_compare "$NODE_VERSION" "16.0.0"
+if [ $? -eq 2 ]; then
+    error "Node.js version must be 16.0.0 or higher. Current version: $NODE_VERSION" 21
+fi
+echo -e "${GREEN}✓ Node.js version $NODE_VERSION is compatible${NC}"
+
 # Check for Supabase sparse clone and configure it
 echo "Checking Supabase repository for sparse checkout..."
 if [ -d "$ROOT_DIR/supabase" ] && [ ! -d "$ROOT_DIR/supabase/.git" ]; then
