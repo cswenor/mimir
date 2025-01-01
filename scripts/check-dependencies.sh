@@ -83,6 +83,24 @@ version_compare() {
     return 0
 }
 
+# Check for jq dependency
+echo "Checking for jq dependency..."
+if ! command -v jq &> /dev/null; then
+    echo -e "${YELLOW}jq is not installed. Attempting to install...${NC}"
+    if command -v apt-get &> /dev/null; then
+        sudo apt-get update && sudo apt-get install -y jq || error "Failed to install jq using apt-get" 16
+    elif command -v yum &> /dev/null; then
+        sudo yum install -y jq || error "Failed to install jq using yum" 16
+    elif command -v brew &> /dev/null; then
+        brew install jq || error "Failed to install jq using brew" 16
+    else
+        error "Package manager not found. Please install jq manually: https://stedolan.github.io/jq/download/" 16
+    fi
+    echo -e "${GREEN}✓ jq installed successfully${NC}"
+else
+    log "jq is already installed"
+fi
+
 # Check for Supabase sparse clone and configure it
 echo "Checking Supabase repository for sparse checkout..."
 if [ -d "$ROOT_DIR/supabase" ] && [ ! -d "$ROOT_DIR/supabase/.git" ]; then

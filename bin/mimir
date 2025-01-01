@@ -31,6 +31,26 @@ is_container_running() {
     docker ps --format '{{.Names}}' | grep -q "^$container_name$"
 }
 
+# Function to check if required containers are running
+check_required_containers() {
+    local required_containers=("$@")
+    local missing_containers=()
+    
+    for container in "${required_containers[@]}"; do
+        if ! is_container_running "$container"; then
+            missing_containers+=("$container")
+        fi
+    done
+    
+    if [ ${#missing_containers[@]} -ne 0 ]; then
+        echo -e "${RED}ERROR: The following required containers are not running:${NC}"
+        printf '%s\n' "${missing_containers[@]}"
+        return 1
+    fi
+    
+    return 0
+}
+
 # Command functions
 cmd_status() {
     local container_name="voi-follower-node"
@@ -93,7 +113,6 @@ cmd_stop() {
     echo -e "${GREEN}All services stopped successfully!${NC}"
 }
 
-
 cmd_init() {
     # Parse flags for init command
     VERBOSE=0
@@ -144,6 +163,40 @@ cmd_reset() {
     fi
 }
 
+cmd_backup() {
+    # Parse flags for backup command
+    VERBOSE=0
+    while getopts ":v" opt; do
+        case $opt in
+            v)
+                VERBOSE=1
+                ;;
+            \?)
+                error "Invalid option: -$OPTARG"
+                ;;
+        esac
+    done
+    shift $((OPTIND-1))
+
+    echo -e "${BLUE}${BOLD}Creating Mimir database backup...${NC}"
+    
+    # Check for required containers
+    required_containers=(
+        "supabase_db_1"
+        "supabase_storage_1"
+        "supabase_kong_1"
+    )
+    
+    if ! check_required_containers "${required_containers[@]}"; then
+        error "Required Supabase services are not running. Please start Mimir services first."
+    fi
+    
+    cd "$MIMIR_HOME" || error "Failed to change to Mimir home directory"
+    if ! "$SCRIPTS_DIR/backup.sh" $([ $VERBOSE -eq 1 ] && echo "-v"); then
+        error "Backup failed"
+    fi
+}
+
 # Function to show usage
 show_usage() {
     echo -e "${BOLD}Mimir - Voi Network Indexer Management Tool${NC}"
@@ -156,6 +209,7 @@ show_usage() {
     echo "  stop        Stop all services"
     echo "  reset       Reset the Mimir environment (requires confirmation)"
     echo "  status      Check the status of the Voi node"
+    echo "  backup      Create a database backup and store it in Supabase storage"
     echo "  help        Show this help message"
     echo
     echo "Options:"
@@ -165,6 +219,9 @@ show_usage() {
     echo "  reset:"
     echo "    -v        Verbose mode"
     echo "    -f        Force reset (skip confirmation)"
+    echo
+    echo "  backup:"
+    echo "    -v        Verbose mode"
     echo
 }
 
@@ -186,6 +243,10 @@ case "$1" in
         ;;
     status)
         cmd_status
+        ;;
+    backup)
+        shift
+        cmd_backup "$@"
         ;;
     help|--help|-h)
         show_usage
