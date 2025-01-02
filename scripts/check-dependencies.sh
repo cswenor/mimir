@@ -135,6 +135,20 @@ if [ $? -eq 2 ]; then
 fi
 echo -e "${GREEN}✓ Node.js version $NODE_VERSION is compatible${NC}"
 
+# Check for Supabase CLI
+echo "Checking for Supabase CLI..."
+if ! command -v supabase &> /dev/null; then
+    echo -e "${YELLOW}Supabase CLI is not installed. Attempting to install...${NC}"
+    if command -v brew &> /dev/null; then
+        brew install supabase/tap/supabase || error "Failed to install Supabase CLI using Homebrew" 22
+    else
+        curl -fsSL https://cli.supabase.com/install | sh || error "Failed to install Supabase CLI" 22
+    fi
+    echo -e "${GREEN}✓ Supabase CLI installed successfully${NC}"
+else
+    log "Supabase CLI is already installed"
+fi
+
 # Check for Supabase sparse clone and configure it
 echo "Checking Supabase repository for sparse checkout..."
 if [ -d "$ROOT_DIR/supabase" ] && [ ! -d "$ROOT_DIR/supabase/.git" ]; then

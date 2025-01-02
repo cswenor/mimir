@@ -45,7 +45,11 @@ error() {
 # Source the environment file
 ENV_FILE="$MIMIR_HOME/supabase/docker/.env"
 if [ -f "$ENV_FILE" ]; then
-    source "$ENV_FILE"
+    grep -v "STUDIO_DEFAULT" "$ENV_FILE" > "$ENV_FILE.tmp"
+    set -a
+    source "$ENV_FILE.tmp"
+    set +a
+    rm "$ENV_FILE.tmp"
     log "Loaded environment from $ENV_FILE"
 else
     error "Environment file not found at $ENV_FILE"
@@ -57,6 +61,7 @@ required_vars=(
     "SERVICE_ROLE_KEY"
     "POSTGRES_DB"
     "POSTGRES_PORT"
+    "SUPABASE_PUBLIC_URL"
 )
 
 for var in "${required_vars[@]}"; do
@@ -74,58 +79,110 @@ fi
 BACKUP_DATE=$(date +%Y%m%d_%H%M%S)
 BACKUP_NAME="mimir_backup_${BACKUP_DATE}"
 
-log "Creating backup: ${BACKUP_NAME}"
-
-# Create backup and upload directly to Supabase storage
-cd "$MIMIR_HOME/supabase/docker" || error "Failed to change to Supabase directory"
-
-echo -e "${YELLOW}Creating and uploading backup...${NC}"
+# Create backup directory if it doesn't exist
+BACKUP_DIR="$MIMIR_HOME/supabase/backups"
+mkdir -p "$BACKUP_DIR"
+log "Created backup directory: $BACKUP_DIR"
 
 # Create the backup
-if ! supabase db dump --db-url postgresql://postgres:${POSTGRES_PASSWORD}@localhost:${POSTGRES_PORT}/${POSTGRES_DB} | \
-   curl -X POST \
-        "${SUPABASE_PUBLIC_URL}/storage/v1/object/backups/${BACKUP_NAME}.sql" \
-        -H "Authorization: Bearer ${SERVICE_ROLE_KEY}" \
-        -H "Content-Type: application/octet-stream" \
-        --data-binary @- ; then
-    error "Failed to create or upload backup"
+echo -e "${YELLOW}Starting database backup...${NC}"
+log "Using database: ${POSTGRES_DB}"
+log "Backup file: $BACKUP_DIR/${BACKUP_NAME}.sql"
+
+if ! docker exec supabase-db pg_dump \
+    -U postgres \
+    --clean \
+    --if-exists \
+    --no-owner \
+    --no-privileges \
+    --verbose \
+    "${POSTGRES_DB}" \
+    > "$BACKUP_DIR/${BACKUP_NAME}.sql" \
+    2> >(while read -r line; do log "$line"; done); then
+    error "Failed to create backup"
 fi
 
-echo -e "${GREEN}✓ Backup created and uploaded successfully${NC}"
+log "Backup size: $(du -h "$BACKUP_DIR/${BACKUP_NAME}.sql" | cut -f1)"
+echo -e "${GREEN}✓ Backup created successfully${NC}"
 
-# Prune old backups
-echo -e "${YELLOW}Pruning old backups...${NC}"
-log "Fetching list of existing backups"
+echo -e "${YELLOW}Creating backups bucket (or confirming if it already exists)...${NC}"
 
-BACKUPS=$(curl -s \
-    "${SUPABASE_PUBLIC_URL}/storage/v1/object/list/backups" \
-    -H "Authorization: Bearer ${SERVICE_ROLE_KEY}" | \
-    jq -r '.[] | select(.name | endswith(".sql")) | {name: .name, created_at: .created_at}' | \
-    jq -s 'sort_by(.created_at)') || error "Failed to list existing backups"
+# Use heredoc to avoid complex quoting issues
+docker exec -i supabase-db psql -U postgres -q <<EOF
+DO \$\$
+BEGIN
+    -- Check if the 'backups' bucket already exists
+    IF EXISTS (SELECT 1 FROM storage.buckets WHERE name = 'backups') THEN
+        RAISE NOTICE 'The backups bucket already exists.';
+    ELSE
+        -- Create the 'backups' bucket
+        INSERT INTO storage.buckets (id, name, owner, public)
+        VALUES ('backups', 'backups', auth.uid(), true);
 
-# Count total backups
-TOTAL_BACKUPS=$(echo $BACKUPS | jq length)
-log "Found $TOTAL_BACKUPS total backups"
+        RAISE NOTICE 'The backups bucket has been created.';
+    END IF;
 
-if [ $TOTAL_BACKUPS -gt 1 ]; then
-    # Get all backup names except the newest one that are older than 7 days
-    OLD_BACKUPS=$(echo $BACKUPS | \
-        jq -r '.[] | select(
-            .created_at < (now - 604800 | todate) and
-            .created_at != (max_by(.created_at).created_at)
-        ) | .name')
+    -- Policy for anon to only read (SELECT)
+    BEGIN
+        CREATE POLICY "Give anon users read access"
+        ON storage.objects
+        FOR SELECT
+        TO anon
+        USING (bucket_id = 'backups');
+    EXCEPTION
+        WHEN duplicate_object THEN
+            RAISE NOTICE 'Policy "Give anon users read access" already exists for bucket backups.';
+    END;
 
-    # Delete old backups
-    for backup in $OLD_BACKUPS; do
-        log "Deleting old backup: $backup"
-        if curl -X DELETE \
-            "${SUPABASE_PUBLIC_URL}/storage/v1/object/backups/${backup}" \
-            -H "Authorization: Bearer ${SERVICE_ROLE_KEY}"; then
-            echo -e "${GREEN}✓ Deleted old backup: ${backup}${NC}"
-        else
-            echo -e "${YELLOW}Warning: Failed to delete backup: ${backup}${NC}"
-        fi
-    done
+    -- Policy for service_role to write (INSERT, UPDATE, DELETE) + read
+    BEGIN
+        CREATE POLICY "Allow service_role writes"
+        ON storage.objects
+        FOR ALL
+        TO service_role
+        USING (bucket_id = 'backups')
+        WITH CHECK (bucket_id = 'backups');
+    EXCEPTION
+        WHEN duplicate_object THEN
+            RAISE NOTICE 'Policy "Allow service_role writes" already exists for bucket backups.';
+    END;
+END
+\$\$;
+EOF
+
+# The local backup file
+BACKUP_FILE="$BACKUP_DIR/${BACKUP_NAME}.sql"
+
+echo -e "${YELLOW}Uploading backup to Supabase storage (via REST)...${NC}"
+
+############################
+# Additional verbose logging:
+############################
+
+# We'll show part of the SERVICE_ROLE_KEY to avoid leaking the entire token in logs.
+KEY_FIRST8=${SERVICE_ROLE_KEY:0:8}
+KEY_LAST4=${SERVICE_ROLE_KEY: -4}
+MASKED_KEY="${KEY_FIRST8}...${KEY_LAST4}"
+
+if [ $VERBOSE -eq 1 ]; then
+    log "Uploading to: ${SUPABASE_PUBLIC_URL}/storage/v1/object/backups/${BACKUP_NAME}.sql"
+    log "Auth Bearer: ${MASKED_KEY}"
 fi
 
-echo -e "${GREEN}✓ Backup process completed successfully!${NC}"
+# If VERBOSE=1, add `-v` for more debug info in the curl call.
+CURL_ARGS="-s -S -f"
+if [ $VERBOSE -eq 1 ]; then
+  CURL_ARGS="-v -s -S -f"
+fi
+
+# Use a direct upload to the local Supabase Storage API via curl
+# SERVICE_ROLE_KEY is used as a Bearer token to bypass RLS.
+if ! curl ${CURL_ARGS} -X POST \
+  "${SUPABASE_PUBLIC_URL}/storage/v1/object/backups/${BACKUP_NAME}.sql" \
+  -H "Authorization: Bearer ${SERVICE_ROLE_KEY}" \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary @"${BACKUP_FILE}"; then
+  error "Failed to upload backup with curl"
+fi
+
+echo -e "${GREEN}✓ Backup uploaded successfully to Storage${NC}"

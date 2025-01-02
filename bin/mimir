@@ -182,9 +182,10 @@ cmd_backup() {
     
     # Check for required containers
     required_containers=(
-        "supabase_db_1"
-        "supabase_storage_1"
-        "supabase_kong_1"
+        "supabase-db"
+        "supabase-storage"
+        "supabase-kong"
+        "supabase-pooler"
     )
     
     if ! check_required_containers "${required_containers[@]}"; then
