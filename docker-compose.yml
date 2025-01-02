@@ -2,6 +2,7 @@ name: mimir
 
 services:
   voi-node:
+    platform: ${TARGETARCH:-linux/amd64}
     image: ghcr.io/voinetwork/voi-node:latest
     container_name: voi-follower-node
     environment:
@@ -19,6 +20,7 @@ services:
       - voi-conduit-net
 
   conduit:
+    platform: ${TARGETARCH:-linux/amd64}
     image: algorand/conduit:latest
     volumes:
       - ./conduit.yml:/etc/algorand/conduit.yml

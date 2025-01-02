@@ -58,7 +58,15 @@ fs.readFile(templatePath, 'utf8', (err, data) => {
         // Generate JWT tokens
         const { anonToken, serviceToken } = generateJWTTokens(jwtSecret);
 
-        // Replace the placeholder values
+        // Add Mimir specific configuration section
+        const mimirConfig = `
+############
+# Prime Mimir Instance
+############
+PRIME_SUPABASE_URL=https://mimir.voi.sh    # Change this to your prime instance URL
+`;
+
+        // Replace the placeholder values and add Mimir config
         const newEnv = data
             .replace('your-super-secret-and-long-postgres-password', postgresPassword)
             .replace('your-super-secret-jwt-token-with-at-least-32-characters', jwtSecret)
@@ -67,7 +75,8 @@ fs.readFile(templatePath, 'utf8', (err, data) => {
             .replace(/NODE_TOKEN=.*/, `NODE_TOKEN=${nodeToken}`)
             .replace(/NODE_ADMIN_TOKEN=.*/, `NODE_ADMIN_TOKEN=${nodeAdminToken}`)
             .replace(/ANON_KEY=.*/, `ANON_KEY=${anonToken}`)
-            .replace(/SERVICE_ROLE_KEY=.*/, `SERVICE_ROLE_KEY=${serviceToken}`);
+            .replace(/SERVICE_ROLE_KEY=.*/, `SERVICE_ROLE_KEY=${serviceToken}`)
+            + mimirConfig;  // Append Mimir configuration at the end
 
         // Write the .env file to the docker directory
         const dockerEnvPath = path.join(DOCKER_DIR, '.env');
@@ -87,6 +96,8 @@ fs.readFile(templatePath, 'utf8', (err, data) => {
         console.log('\nSERVICE_ROLE_KEY:', serviceToken);
         console.log('\nLocal Analytics Configuration:');
         console.log('LOGFLARE_API_KEY:', localLogflareKey);
+        console.log('\nMimir Configuration:');
+        console.log('PRIME_SUPABASE_URL: http://localhost:8000 (Default - Update this in .env)');
 
         console.log('\nNOTE: This setup uses Postgres as the analytics backend.');
         console.log('If you want to use Logflare\'s hosted service:');
@@ -94,6 +105,7 @@ fs.readFile(templatePath, 'utf8', (err, data) => {
         console.log('2. Get your API key from the Logflare dashboard');
         console.log('3. Replace the LOGFLARE_API_KEY in .env with your actual key');
         console.log('4. Uncomment the BigQuery configuration in docker-compose.yml');
+        console.log('\nIMPORTANT: Don\'t forget to update PRIME_SUPABASE_URL in .env with your prime instance URL');
     } catch (error) {
         console.error('An error occurred:', error);
         process.exit(1);

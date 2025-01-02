@@ -23,6 +23,7 @@ supabase
 /supabase/volumes/
 /supabase/seed.sql
 /supabase/.temp/
+/supabase/backups/
 
 # Docker
 docker-compose.override.yml
