@@ -84,10 +84,10 @@ BACKUP_DIR="$MIMIR_HOME/supabase/backups"
 mkdir -p "$BACKUP_DIR"
 log "Created backup directory: $BACKUP_DIR"
 
-# Create the backup
+# Create the backup (uncompressed .sql)
 echo -e "${YELLOW}Starting database backup...${NC}"
 log "Using database: ${POSTGRES_DB}"
-log "Backup file: $BACKUP_DIR/${BACKUP_NAME}.sql"
+log "Backup file (uncompressed): $BACKUP_DIR/${BACKUP_NAME}.sql"
 
 if ! docker exec supabase-db pg_dump \
     -U postgres \
@@ -102,8 +102,19 @@ if ! docker exec supabase-db pg_dump \
     error "Failed to create backup"
 fi
 
-log "Backup size: $(du -h "$BACKUP_DIR/${BACKUP_NAME}.sql" | cut -f1)"
-echo -e "${GREEN}✓ Backup created successfully${NC}"
+log "Uncompressed backup size: $(du -h "$BACKUP_DIR/${BACKUP_NAME}.sql" | cut -f1)"
+
+# Now gzip it for a smaller file
+echo -e "${YELLOW}Compressing backup with gzip...${NC}"
+if ! gzip -9 "$BACKUP_DIR/${BACKUP_NAME}.sql"; then
+    error "Failed to gzip backup"
+fi
+
+# After gzipping, the file is now named "mimir_backup_<TS>.sql.gz"
+BACKUP_FILE="$BACKUP_DIR/${BACKUP_NAME}.sql.gz"
+
+log "Compressed backup size: $(du -h "$BACKUP_FILE" | cut -f1)"
+echo -e "${GREEN}✓ Backup created and compressed successfully${NC}"
 
 echo -e "${YELLOW}Creating backups bucket (or confirming if it already exists)...${NC}"
 
@@ -150,10 +161,7 @@ END
 \$\$;
 EOF
 
-# The local backup file
-BACKUP_FILE="$BACKUP_DIR/${BACKUP_NAME}.sql"
-
-echo -e "${YELLOW}Uploading backup to Supabase storage (via REST)...${NC}"
+echo -e "${YELLOW}Uploading compressed backup to Supabase storage (via REST)...${NC}"
 
 ############################
 # Additional verbose logging:
@@ -165,7 +173,7 @@ KEY_LAST4=${SERVICE_ROLE_KEY: -4}
 MASKED_KEY="${KEY_FIRST8}...${KEY_LAST4}"
 
 if [ $VERBOSE -eq 1 ]; then
-    log "Uploading to: ${SUPABASE_PUBLIC_URL}/storage/v1/object/backups/${BACKUP_NAME}.sql"
+    log "Uploading to: ${SUPABASE_PUBLIC_URL}/storage/v1/object/backups/${BACKUP_NAME}.sql.gz"
     log "Auth Bearer: ${MASKED_KEY}"
 fi
 
@@ -178,11 +186,13 @@ fi
 # Use a direct upload to the local Supabase Storage API via curl
 # SERVICE_ROLE_KEY is used as a Bearer token to bypass RLS.
 if ! curl ${CURL_ARGS} -X POST \
-  "${SUPABASE_PUBLIC_URL}/storage/v1/object/backups/${BACKUP_NAME}.sql" \
+  "${SUPABASE_PUBLIC_URL}/storage/v1/object/backups/${BACKUP_NAME}.sql.gz" \
   -H "Authorization: Bearer ${SERVICE_ROLE_KEY}" \
   -H "Content-Type: application/octet-stream" \
   --data-binary @"${BACKUP_FILE}"; then
   error "Failed to upload backup with curl"
 fi
 
-echo -e "${GREEN}✓ Backup uploaded successfully to Storage${NC}"
+echo -e "${GREEN}✓ Compressed backup uploaded successfully to Storage${NC}"
+
+# echo -e "${GREEN}✓ Backup process completed successfully!${NC}"
