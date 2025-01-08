@@ -61,7 +61,9 @@ required_vars=(
     "SERVICE_ROLE_KEY"
     "POSTGRES_DB"
     "POSTGRES_PORT"
-    "SUPABASE_PUBLIC_URL"
+    # We no longer strictly need SUPABASE_PUBLIC_URL,
+    # but keep verifying it if you want, or remove entirely:
+    # "SUPABASE_PUBLIC_URL"
 )
 
 for var in "${required_vars[@]}"; do
@@ -74,6 +76,9 @@ done
 if ! command -v jq &> /dev/null; then
     error "jq is not installed. Please install it to use the backup feature."
 fi
+
+# We can define the local Kong URL explicitly here:
+SUPABASE_LOCAL_URL="http://localhost:8000"
 
 # Set backup name with timestamp
 BACKUP_DATE=$(date +%Y%m%d_%H%M%S)
@@ -173,7 +178,7 @@ KEY_LAST4=${SERVICE_ROLE_KEY: -4}
 MASKED_KEY="${KEY_FIRST8}...${KEY_LAST4}"
 
 if [ $VERBOSE -eq 1 ]; then
-    log "Uploading to: ${SUPABASE_PUBLIC_URL}/storage/v1/object/backups/${BACKUP_NAME}.sql.gz"
+    log "Uploading to: ${SUPABASE_LOCAL_URL}/storage/v1/object/backups/${BACKUP_NAME}.sql.gz"
     log "Auth Bearer: ${MASKED_KEY}"
 fi
 
@@ -186,7 +191,7 @@ fi
 # Use a direct upload to the local Supabase Storage API via curl
 # SERVICE_ROLE_KEY is used as a Bearer token to bypass RLS.
 if ! curl ${CURL_ARGS} -X POST \
-  "${SUPABASE_PUBLIC_URL}/storage/v1/object/backups/${BACKUP_NAME}.sql.gz" \
+  "${SUPABASE_LOCAL_URL}/storage/v1/object/backups/${BACKUP_NAME}.sql.gz" \
   -H "Authorization: Bearer ${SERVICE_ROLE_KEY}" \
   -H "Content-Type: application/octet-stream" \
   --data-binary @"${BACKUP_FILE}"; then
@@ -195,4 +200,47 @@ fi
 
 echo -e "${GREEN}✓ Compressed backup uploaded successfully to Storage${NC}"
 
-# echo -e "${GREEN}✓ Backup process completed successfully!${NC}"
+# Delete local copy after upload is successful
+rm -f "${BACKUP_FILE}"
+echo -e "${YELLOW}Deleted local backup file: ${BACKUP_FILE}${NC}"
+
+#################################################
+# Prune old backups beyond the 3 newest
+#################################################
+echo -e "${YELLOW}Pruning old backups so only the 3 newest remain...${NC}"
+
+BACKUPS_JSON=$(
+  curl -s -f \
+    "${SUPABASE_LOCAL_URL}/storage/v1/object/list/backups" \
+    -H "Authorization: Bearer ${SERVICE_ROLE_KEY}"
+)
+
+# If the request fails or is empty, skip pruning
+if [ -z "$BACKUPS_JSON" ]; then
+  echo -e "${RED}Failed to retrieve backups list or no backups found${NC}"
+else
+  # Extract objects that end with '.sql.gz' (or adjust if needed)
+  # Then sort by created_at descending, skip the first 3, and remove the rest
+  OLD_BACKUPS=$(echo "$BACKUPS_JSON" | jq -r '
+    [ .[] | select(.name | endswith(".sql.gz")) ]
+    | sort_by(.created_at) | reverse
+    | .[3:]
+    | .[].name
+  ')
+
+  if [ -n "$OLD_BACKUPS" ]; then
+    for b in $OLD_BACKUPS; do
+      echo -e "${YELLOW}Deleting old backup: $b${NC}"
+      # Delete the old backup
+      curl -s -f -X DELETE \
+        "${SUPABASE_LOCAL_URL}/storage/v1/object/backups/${b}" \
+        -H "Authorization: Bearer ${SERVICE_ROLE_KEY}" \
+      && echo -e "${GREEN}✓ Deleted backup: $b${NC}" \
+      || echo -e "${RED}Failed to delete: $b${NC}"
+    done
+  else
+    log "No old backups to prune."
+  fi
+fi
+
+echo -e "${GREEN}✓ Backup process (with pruning) completed successfully!${NC}"
